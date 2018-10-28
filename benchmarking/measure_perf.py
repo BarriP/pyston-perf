@@ -33,84 +33,86 @@ def run_tests(executables, benchmarks, filters, callbacks, benchmark_dir):
 
     for b in benchmarks:
         for i, e in enumerate(executables):
-            skip = False
-            for f in filters:
-                skip = f(e, b.filename)
-                assert not isinstance(skip, float), "%r needs to be converted" % f
-                if skip:
-                    break
+            run_times = e.opts.get('run_times', 1)
+            for _ in xrange(run_times):
+                skip = False
+                for f in filters:
+                    skip = f(e, b.filename)
+                    assert not isinstance(skip, float), "%r needs to be converted" % f
+                    if skip:
+                        break
 
-            if not isinstance(skip, tuple) and skip:
-                # print "%s %s: skipped" % (e.name.rjust(EXE_LEN), b.filename.ljust(35))
-                failed[i] = True
-                continue
+                if not isinstance(skip, tuple) and skip:
+                    # print "%s %s: skipped" % (e.name.rjust(EXE_LEN), b.filename.ljust(35))
+                    failed[i] = True
+                    continue
 
-            take_min = e.opts.get("take_min")
-            if isinstance(skip, float) and not take_min:
-                elapsed, size = skip
-                code = 0
-            else:
-                code = 0
-
-                args = e.args + [os.path.join(benchmark_dir, b.filename)]
-                if b.filename == "(calibration)":
-                    args = ["python", os.path.join(benchmark_dir, "fannkuch_med.py")]
-
-                if isinstance(skip, float):
-                    # print "Previous min was", skip
+                take_min = e.opts.get("take_min")
+                if isinstance(skip, float) and not take_min:
                     elapsed, size = skip
+                    code = 0
                 else:
-                    elapsed = size = float('inf')
+                    code = 0
 
-                def do_run():
-                    if e.opts.get("clear_cache"):
-                        subprocess.check_call(["rm", "-rf", os.path.expanduser("~/.cache/pyston")])
-                    # print "running", args
-                    p = subprocess.Popen(["time", "-v"] + args, stdout=open("/dev/null", 'w'), stderr=subprocess.PIPE)
-                    out, err = p.communicate()
-                    assert not out
-                    code = p.wait()
-                    size = int(re.search("Maximum resident set size .*: (\\d+)", err).group(1))
-                    size = size / 1024.0 # Should this be 1000?
-                    return code, size
+                    args = e.args + [os.path.join(benchmark_dir, b.filename)]
+                    if b.filename == "(calibration)":
+                        args = ["python", os.path.join(benchmark_dir, "fannkuch_med.py")]
 
-                run_times = e.opts.get('run_times', 1)
-                if b.filename == "(calibration)":
-                    run_times = 1
-                # Warmup:
-                for _ in xrange(run_times - 1):
+                    if isinstance(skip, float):
+                        # print "Previous min was", skip
+                        elapsed, size = skip
+                    else:
+                        elapsed = size = float('inf')
+
+                    def do_run():
+                        if e.opts.get("clear_cache"):
+                            subprocess.check_call(["rm", "-rf", os.path.expanduser("~/.cache/pyston")])
+                        # print "running", args
+                        p = subprocess.Popen(["time", "-v"] + args, stdout=open("/dev/null", 'w'), stderr=subprocess.PIPE)
+                        out, err = p.communicate()
+                        assert not out
+                        code = p.wait()
+                        size = int(re.search("Maximum resident set size .*: (\\d+)", err).group(1))
+                        size = size / 1024.0 # Should this be 1000?
+                        return code, size
+
+                    
+                    if b.filename == "(calibration)":
+                        run_times = 1
+                    # Warmup:
+                    for _ in xrange(run_times - 1):
+                        start = time.time()
+                        code, _size = do_run()
+                        if code == 0:
+                            _e = time.time() - start
+                            if take_min:
+                                # print _e
+                                elapsed = min(elapsed, _e)
+                                size = min(size, _size)
+
                     start = time.time()
                     code, _size = do_run()
-                    if code == 0:
-                        _e = time.time() - start
-                        if take_min:
-                            # print _e
-                            elapsed = min(elapsed, _e)
-                            size = min(size, _size)
+                    _e = time.time() - start
+                    if take_min:
+                        # print _e
+                        elapsed = min(elapsed, _e)
+                        size = min(size, _size)
+                    else:
+                        elapsed = _e
+                        size = _size
 
-                start = time.time()
-                code, _size = do_run()
-                _e = time.time() - start
-                if take_min:
-                    # print _e
-                    elapsed = min(elapsed, _e)
-                    size = min(size, _size)
+                if code != 0:
+                    print "%s %s: failed (code %d)" % (e.name.rjust(EXE_LEN), b.filename.ljust(35), code),
+                    failed[i] = True
                 else:
-                    elapsed = _e
-                    size = _size
+                    print "%s %s: % 6.2fs (%2.1fMB)" % (e.name.rjust(EXE_LEN), b.filename.ljust(35), elapsed, size),
 
-            if code != 0:
-                print "%s %s: failed (code %d)" % (e.name.rjust(EXE_LEN), b.filename.ljust(35), code),
-                failed[i] = True
-            else:
-                print "%s %s: % 6.2fs (%2.1fMB)" % (e.name.rjust(EXE_LEN), b.filename.ljust(35), elapsed, size),
+                    # times[i].append(elapsed)
 
-                # times[i].append(elapsed)
+                    for cb in callbacks:
+                        cb(e, b.filename, elapsed, size)
 
-                for cb in callbacks:
-                    cb(e, b.filename, elapsed, size)
-
-            print
+                print
 
     '''
     geomean_str = " ".join(sorted([os.path.basename(b.filename) for b in benchmarks if b.include_in_average]))
