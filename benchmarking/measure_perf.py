@@ -80,7 +80,7 @@ def run_tests(executables, benchmarks, filters, callbacks, benchmark_dir):
                     if b.filename == "(calibration)":
                         run_times = 1
                     # Warmup:
-                    for _ in xrange(run_times - 1):
+                    for _ in xrange(4):
                         start = time.time()
                         code, _size = do_run()
                         if code == 0:
